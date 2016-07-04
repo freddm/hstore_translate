@@ -25,14 +25,30 @@ module HstoreTranslate
           where("#{quoted_translation_store} @> hstore(:locale, :value)", locale: locale, value: value)
         end
       end
-
-      alias_method_chain :respond_to?, :translates
-      alias_method_chain :method_missing, :translates
     end
 
     # Improve compatibility with the gem globalize
     def translates?
       included_modules.include?(InstanceMethods)
+    end
+    
+    module Overrides
+      def respond_to?(symbol, include_all = false)
+        return true if parse_translated_attribute_accessor(symbol)
+        super(symbol, include_all)
+      end
+      
+      def method_missing(method_name, *args)
+        translated_attr_name, locale, assigning = parse_translated_attribute_accessor(method_name)
+        
+        return super(method_name, *args) unless translated_attr_name
+        
+        if assigning
+          write_hstore_translation(translated_attr_name, args.first, locale)
+        else
+          read_hstore_translation(translated_attr_name, locale)
+        end
+      end
     end
 
     module InstanceMethods
@@ -76,24 +92,9 @@ module HstoreTranslate
         send("#{translation_store}=", translations)
         value
       end
-
-      def respond_to_with_translates?(symbol, include_all = false)
-        return true if parse_translated_attribute_accessor(symbol)
-        respond_to_without_translates?(symbol, include_all)
-      end
-
-      def method_missing_with_translates(method_name, *args)
-        translated_attr_name, locale, assigning = parse_translated_attribute_accessor(method_name)
-
-        return method_missing_without_translates(method_name, *args) unless translated_attr_name
-
-        if assigning
-          write_hstore_translation(translated_attr_name, args.first, locale)
-        else
-          read_hstore_translation(translated_attr_name, locale)
-        end
-      end
-
+      
+      prepend HstoreTranslate::Translates::Overrides
+      
       # Internal: Parse a translated convenience accessor name.
       #
       # method_name - The accessor name.
